@@ -1,0 +1,8 @@
+1. Track Obtained Servants and their Ascension/Skill Level
+2. Categorize Servants by their priority and group necessary mats
+3. Display future servant banners
+4. Add a wish list that will display future needed mats as well as average sq cost\
+5. Display upcoming materials
+6. Show location to farm when clicking on materials
+7. Show materials/sq available from interludes/rank-ups
+8. Track CEs
