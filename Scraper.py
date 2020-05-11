@@ -1,18 +1,16 @@
 import requests
 import time
-from requests.exceptions import RequestException
-from tqdm import tqdm
-from contextlib import closing
+import os
 from bs4 import BeautifulSoup
+from tqdm import tqdm
 
-#Config Values
-UpdateLocalFiles = False
-BaseURL = 'https://gamepress.gg'
-ListURL = '/grandorder/servants'
-PathToFiles = "./Scraping Initial Data/"
+#URL Links to scrape
+base_url = 'https://gamepress.gg'
+list_url = '/grandorder/servants'
+path_to_files = "./scrapingData/"
 
 #Blacklist Servants that aren't obtainable
-BlackList = [
+blackList = [
     '/grandorder/servant/beast-iiil',
     '/grandorder/servant/solomon-grand-caster',
     '/grandorder/servant/goetia',
@@ -21,75 +19,11 @@ BlackList = [
     '/grandorder/servant/beast-iiir'
 ]
 
-#Globals
-ServantList = []
+buffer_size = 1024
 
-class ServantInfo:
-    def __init__(self, link):
-        self.url = link['href']
-        self.name = link.contents[0].replace('\\n', '')
-        ScrapeServant(BaseURL + self.url, self)
-
-#DFS Traversal of HTML until leaf is hit
-def FindFirstBottom(soup):
-    temp = soup
-    bottom = False
-    while not bottom:
-        bottom = True
-        #Check if current level has any contents
-        if hasattr(temp, 'contents'):
-            for content in temp.contents:
-                #Check if the contents are traversible or just strings
-                if hasattr(content, 'contents'):
-                    temp = content
-                    bottom = False
-                    break
-    return temp.text
-
-#Handles the Subheader div class
-def ScrapeSubheader(soup, servant):
-        #classIcon = soup.find('span', {'class': 'class-icon'})
-        servant.classTitle = FindFirstBottom(soup.find('span', {'class': 'class-title'}))
-        servant.rarity = FindFirstBottom(soup.find('span', {'class': 'class-rarity'}))
-
-def ScrapeServant(link, servant):
-    #Define the File Name of Servant to be Scraped
-    ServantPage = PathToFiles + link.split('/')[-1] + ".html"
-
-    #Update Local HTML Pages to not accidently DDoS Site while testing
-    if(UpdateLocalFiles):
-        page = requests.get(link).content
-        file = open(ServantPage, "w+", encoding="utf-8")
-        file.write(str(page))
-        time.sleep(5)
-        file.close()
-    
-    #Init BS4
-    file = open(ServantPage, "r", encoding="utf-8")
-    soup = BeautifulSoup(file, 'html.parser')
-    file.close()
-
-    #Run BS4 On Local Page of Servant
-    #Div SubHeader for Class Icon, Title, Rarity
-    subheader = soup.find('div', {'id': 'servant-subheader'})
-    if subheader != None:
-        ScrapeSubheader(subheader, servant)
-
-def ScrapeServantList():
-    #Define the File Name for the list of Servants to be Scraped
-    ListPage = PathToFiles + "List.html"
-    
-    #Update Local HTML Pages to not accidently DDoS Site while testing
-    if(UpdateLocalFiles):
-        page = requests.get(BaseURL + ListURL).content
-        file = open(ListPage, "w", encoding="utf-8")                
-        file.write(str(page))
-        file.close()
-
-    #Init BS4
-    file = open(ListPage, "r", encoding="utf-8")
-    soup = BeautifulSoup(file, 'html.parser')
-    file.close()
+def scrape_html():
+    page = requests.get(f'{base_url}{list_url}')
+    soup = BeautifulSoup(page.content, 'html.parser')
 
     #Run BS4 On Local Page of Servants
     table = soup.find('table', { 'id': 'servants-new-list' })
@@ -99,14 +33,43 @@ def ScrapeServantList():
     for row in tqdm(rows):
         if row.has_attr('class'):
             if row['class'] == ['servants-new-row']:
-                title = row.find('span', {'class': 'servant-list-title'})
-                if title.a['href'] not in BlackList:
-                    ServantList.append(ServantInfo(title.a))
+                link = row.find('span', {'class': 'servant-list-title'}).a['href']
+                img = row.find('img', {'class': 'servant-icon'})['src']
+                filename = link.split("/")[-1]
+                if link not in blackList:
+                    pathname = f'{path_to_files}{filename}'
+                    #Make dir if not made
+                    if not os.path.isdir(pathname):
+                        os.makedirs(pathname)
+                    #Cut off the get req and access direct image
+                    try:
+                        pos = img.index('?')
+                        img = img[:pos]
+                    except ValueError:
+                        pass
 
-    for servant in ServantList:
-        print(servant.name)
-        print(servant.classTitle)
-        print(servant.rarity)
+                    #Define paths
+                    ServantPage = f'{pathname}/{filename}.html'
+                    ServantIcon = f'{pathname}/{filename}.{img.split(".")[-1]}'
+
+                    #Get Image
+                    img_url = f'{base_url}{img}'
+                    response = requests.get(img_url, stream=True)
+                    file_size = int(response.headers.get('Content-Length', 0))
+                    progress = tqdm(response.iter_content(buffer_size), f"Downloading {filename}", total=file_size, disable=True, unit="B", unit_scale=True, unit_divisor=1024)
+                    with open(ServantIcon, "wb") as f:
+                        for data in progress:
+                            f.write(data)
+                            progress.update(len(data))
+                        progress.close()
+
+                    #Get Page
+                    page = requests.get(f'{base_url}{link}')
+                    with open(ServantPage, "wb") as f:
+                        f.write(page.content)
+
+                    #Sleep to not accidently DDOS
+                    time.sleep(1)
 
 if __name__ == "__main__":
-    ScrapeServantList()
+    scrape_html()
